@@ -40,3 +40,6 @@ vignettes/*.pdf
 
 # Mac Environment
 .DS_Store
+
+# Processed Data
+data_processed/
