@@ -47,10 +47,10 @@ trends_df %>% filter(week == '2013-03-31' & schname == 'young harris college') %
   group_by(schname, week) %>% summarize(mean(index_std))
 # Checks out.
 
-# Create new DF mean index_std by month grouped by school name and keyword
-trends_schnameKeyword_by_month_df = trends_df %>% group_by(schname, month) %>% 
+# Create new DF mean index_std by week grouped by school name and keyword
+trends_schnameKeyword_by_week_df = trends_df %>% group_by(schname, week) %>% 
   summarize(index_std = mean(index_std))
-View(trends_schnameKeyword_by_month_df)
+View(trends_schnameKeyword_by_week_df)
 
 # Read in the Scorecard and linking data
 scorecard_df = read_csv('./data_raw/Most+Recent+Cohorts+(Scorecard+Elements).csv')
@@ -67,10 +67,10 @@ vtable(id_name_link_df)
 
 # Inner join id_name_link_df to trends_schnameKeyword_by_month_df on schname.
 # Then, inner join to the Scorecard data on unitid and opeid.
-processed_df = trends_schnameKeyword_by_month_df %>% 
+processed_df = trends_schnameKeyword_by_week_df %>% 
   inner_join(id_name_link_df, by = "schname") %>% 
   inner_join(scorecard_df, by = c("unitid", "opeid"))
 vtable(processed_df)
 
 # Outwrite to file.
-write_csv(processed_df, "./data_processed/trends_with_school_scorecards.csv")
+write_csv(processed_df, "./data_processed/weekly_trends_with_school_scorecards.csv")
