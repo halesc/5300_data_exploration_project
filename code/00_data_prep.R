@@ -57,12 +57,13 @@ scorecard_df = read_csv('./data_raw/Most+Recent+Cohorts+(Scorecard+Elements).csv
 id_name_link_df = read_csv('./data_raw/id_name_link.csv')
 View(id_name_link_df)
 
-# Change the scorecard_df's headers to lowercase
-names(scorecard_df) <- tolower(names(scorecard_df))
+# Change the scorecard_df's headers to lowercase also fix broken variable names
+names(scorecard_df) <- make.names(tolower(names(scorecard_df)))
+vtable(scorecard_df)
 
 # Remove duplicate schools
 id_name_link_df = id_name_link_df %>% group_by(schname) %>% mutate(n = n()) %>% 
-  filter(n == 1)
+  filter(n == 1) %>% select(!n)
 vtable(id_name_link_df)
 
 # Inner join id_name_link_df to trends_schnameKeyword_by_month_df on schname.
@@ -70,7 +71,18 @@ vtable(id_name_link_df)
 processed_df = trends_schnameKeyword_by_week_df %>% 
   inner_join(id_name_link_df, by = "schname") %>% 
   inner_join(scorecard_df, by = c("unitid", "opeid"))
-vtable(processed_df)
+
+# Add back in month
+processed_df = processed_df %>% mutate(month = ym(str_sub(week, end = 7)))
+
+# Remove uncollected data based on earnings
+processed_df = processed_df %>% 
+  subset(md_earn_wne_p10.reported.earnings != "PrivacySuppressed" & 
+           md_earn_wne_p10.reported.earnings != "NULL")
+
+# Final checks
+summary(processed_df)
+colSums(is.na(processed_df))
 
 # Outwrite to file.
-write_csv(processed_df, "./data_processed/weekly_trends_with_school_scorecards.csv")
+write_csv(processed_df, "./data_processed/weekly_trends_with_school_scorecards_2022_08_04.csv")

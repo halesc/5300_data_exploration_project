@@ -2,7 +2,7 @@
 title: "Analysis: College Popularity by Google Trends"
 author: "Chris Hales"
 date: "`r Sys.Date()`"
-knit: (function(input, ...) {rmarkdown::render(input, output_file="../paper/filename.html")})
+knit: (function(input, ...) {rmarkdown::render(input, output_file="../paper/analysis.html")})
 output: html_document
 ---
 
@@ -10,22 +10,127 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Research Question
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The College Scorecard was released at the start of September 2015. Among colleges that predominantly grant bachelor’s degrees, did the release of the Scorecard shift student interest to high-earnings colleges relative to low-earnings ones (as proxied by Google searches for keywords associated with those colleges)?
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Or simply...
 
-```{r cars}
-summary(cars)
+Was the effect of the Scorecard different between high and low earning colleges?
+
+The null hypothesis is that the release of the scorecard did not have an effect on school search trends.
+
+## Libraries
+
+``` {r libraries, echo=FALSE}
+# Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+library(vtable)
+library(fixest)
+library(tidyverse)
+library(lubridate)
 ```
 
-## Including Plots
+## Read in Data
 
-You can also embed plots, for example:
+Bring in the processed data and store it in the schools variable. Filter on predominately bachelor degree schools. View the data.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r schools}
+schools = read_csv("./data_processed/weekly_trends_with_school_scorecards_2022_08_04.csv")
+# Filter for colleges that primarily grant bachelors degrees. preddeg == 3.
+schools = schools %>% filter(preddeg == 3)
+vtable(schools)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Data Check: The Dependent Variable
+
+Scatterplot of the dependent variable, index_std:
+
+```{r index_std}
+
+plot(schools$index_std)
+```
+
+The dependent variable, index_std, was standardized across school names and search keywords in the data prep script. Based on the above graph it looks like index_std is appropriately standardized. No further work is needed.
+
+## Seasonality
+
+```{r}
+ggplot(schools, aes(x = month, y = index_std)) + geom_point()
+```
+There does appear to be some seasonal changes within a year that repeat from year to year. Which would make sense with changes over time in the school term and when people would be applying for colleges. I'll solve for that with a month variable inside i(). Here we build out the month_digit variable and factor it as months can be defined as categorical in nature.
+```{r month}
+schools = schools %>% mutate(month_digit = factor(month(week)))
+vtable(schools)
+```
+
+## Factor Unitid
+
+Here I will need to control for within variation for the different schools. Since there is panel data with respect to the various different schools we will need to control for that via the unique id for each university. This will help control the variation within the schools.
+
+``` {r factor}
+schools = schools %>% mutate(unitid = factor(unitid))
+```
+
+## Earnings, the Interaction Variable.
+
+```{r earnings plot}
+ggplot(schools, aes(x = md_earn_wne_p10.reported.earnings)) + geom_density()
+```
+Since I am not going to use the actual earnings within the regression we do not need to take the log of this skewed variable. I will use earnings to decide if a given school is a high or low earning school creating a binary variable.
+
+```{r earnings summary}
+summary(as.numeric(schools$md_earn_wne_p10.reported.earnings))
+```
+
+In order to differentiate between high and low earning I'll focus on the individual and not the household earnings level. [Pew Research](https://www.inc.com/eric-mack/the-shocking-amount-you-need-to-earn-to-be-upper-class-do-you-make-cut.html) considers a household to be upper class if it makes double the median household income. For this study, I will consider schools with median earnings after 10 years over the dataset's median earnings 3rd quartile to be high earning schools and anything below the median to be low earning schools. The research question suggests a high and low difference implying a binary relationships. 
+
+````{r earnings}
+schools = schools %>% mutate(is_high_income = case_when(md_earn_wne_p10.reported.earnings > 48100 ~ TRUE, md_earn_wne_p10.reported.earnings <= 48100 ~ FALSE))
+
+summary(as.numeric(schools$is_high_income))
+````
+
+## The Independent Variable.
+
+The exact date for the release was 2015-09-12 according to the [naicu](https://www.naicu.edu/policy-advocacy/issue-brief-index/regulation/college-scorecard#:~:text=About,a%20federal%20postsecondary%20ratings%20system). This should allow us to split the data into a pre and post scorecard and then check the differences in the interaction effects of the binary is_high_income variable.
+
+``` {r is_scorecard}
+schools_bin = schools %>% mutate(is_scorecard = 
+                                   case_when(week <= ymd("2015-09-13") ~ FALSE,
+                                             week > ymd("2015-09-13") ~ TRUE))
+
+ggplot(schools_bin, aes(x = week, y = index_std, color = is_high_income)) + geom_point() + geom_vline(xintercept = as.Date("2015-09-13")) + geom_smooth(method = 'lm')
+```
+
+## Regression
+
+```{r regression bin}
+reg_bin = feols(schools_bin, index_std ~ is_scorecard + is_high_income + is_scorecard*is_high_income + i(month_digit) | unitid )
+
+etable(reg_bin, keep=c("is_scorecard", "is_high_income"))
+```
+
+Checking for heteroskedasticity
+
+```{r residuals graph}
+plot(fitted(reg_bin), resid(reg_bin))
+```
+There does appear to be an issue with heteroskedasticity as the residuals are a little more wide towards the center and right of the graph and there is a pattern with the data.
+
+``` {r model w/ hetero}
+reg_bin = feols(schools_bin, index_std ~ is_scorecard + is_high_income + is_scorecard*is_high_income + i(month_digit) | unitid, vcov = "hetero" )
+
+etable(reg_bin, keep=c("is_scorecard", "is_high_income"))
+```
+
+```{r wald}
+wald(reg_bin, c("is_scorecard", "is_high_income"), vcov = "hetero")
+```
+
+Seems that the p-value is low enough to reject that null hypothesis that is_scorecard has no effect on Google trends relative to the individual schools. More on this in the next section.
+
+## Regression Analysis
+
+Controlling for the individual school characteristics and the month, when the scorecard exists low income schools have an average index of 0.1381 higher than high income schools that is statistically significant at the 99.9% confidence level. A lower R2 means that there are a lot of this relationship that we fail to cover with this regression. This finding does run counter to what my initial belief in that I assumed the opposite would be true.
+
+With that said there are a lot of factors that go into making a decision as important as attending a college. People may not even consider earning potential at that stage in their life. Also, there is not a ton of data after the scorecard was released. I believe it was something around 8 total months of data gathering time. There's a high chance that a lot of people did not even know about it. As the overall trend of school searches was in decline as well.
